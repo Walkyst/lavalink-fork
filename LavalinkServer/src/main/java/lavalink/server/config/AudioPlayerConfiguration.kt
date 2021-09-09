@@ -6,14 +6,30 @@ import com.sedmelluq.discord.lavaplayer.source.bandcamp.BandcampAudioSourceManag
 import com.sedmelluq.discord.lavaplayer.source.beam.BeamAudioSourceManager
 import com.sedmelluq.discord.lavaplayer.source.http.HttpAudioSourceManager
 import com.sedmelluq.discord.lavaplayer.source.local.LocalAudioSourceManager
-import com.sedmelluq.discord.lavaplayer.source.soundcloud.*
+import com.sedmelluq.discord.lavaplayer.source.soundcloud.DefaultSoundCloudDataReader
+import com.sedmelluq.discord.lavaplayer.source.soundcloud.DefaultSoundCloudFormatHandler
+import com.sedmelluq.discord.lavaplayer.source.soundcloud.DefaultSoundCloudDataLoader
+import com.sedmelluq.discord.lavaplayer.source.soundcloud.DefaultSoundCloudPlaylistLoader
+import com.sedmelluq.discord.lavaplayer.source.soundcloud.SoundCloudAudioSourceManager
 import com.sedmelluq.discord.lavaplayer.source.twitch.TwitchStreamAudioSourceManager
 import com.sedmelluq.discord.lavaplayer.source.vimeo.VimeoAudioSourceManager
+import com.sedmelluq.discord.lavaplayer.source.yamusic.YandexHttpContextFilter
+import com.sedmelluq.discord.lavaplayer.source.yamusic.YandexMusicAudioSourceManager
 import com.sedmelluq.discord.lavaplayer.source.youtube.YoutubeAudioSourceManager
+import com.sedmelluq.discord.lavaplayer.source.youtube.YoutubeHttpContextFilter
 import com.sedmelluq.lava.extensions.youtuberotator.YoutubeIpRotatorSetup
-import com.sedmelluq.lava.extensions.youtuberotator.planner.*
+import com.sedmelluq.lava.extensions.youtuberotator.planner.AbstractRoutePlanner
+import com.sedmelluq.lava.extensions.youtuberotator.planner.BalancingIpRoutePlanner
+import com.sedmelluq.lava.extensions.youtuberotator.planner.NanoIpRoutePlanner
+import com.sedmelluq.lava.extensions.youtuberotator.planner.RotatingIpRoutePlanner
+import com.sedmelluq.lava.extensions.youtuberotator.planner.RotatingNanoIpRoutePlanner
 import com.sedmelluq.lava.extensions.youtuberotator.tools.ip.Ipv4Block
 import com.sedmelluq.lava.extensions.youtuberotator.tools.ip.Ipv6Block
+import org.apache.http.HttpHost
+import org.apache.http.auth.AuthScope
+import org.apache.http.auth.UsernamePasswordCredentials
+import org.apache.http.client.config.RequestConfig
+import org.apache.http.impl.client.BasicCredentialsProvider
 import org.slf4j.LoggerFactory
 import org.springframework.context.annotation.Bean
 import org.springframework.context.annotation.Configuration
@@ -36,8 +52,28 @@ class AudioPlayerConfiguration {
             audioPlayerManager.enableGcMonitoring()
         }
 
+        val defaultFrameBufferDuration = audioPlayerManager.frameBufferDuration
+        serverConfig.frameBufferDurationMs?.let {
+            if (it < 200) { // At the time of writing, LP enforces a minimum of 200ms.
+                log.warn("Buffer size of {}ms is illegal. Defaulting to {}", it, defaultFrameBufferDuration)
+            }
+
+            val bufferDuration = it.takeIf { it >= 200 } ?: defaultFrameBufferDuration
+            log.debug("Setting frame buffer duration to {}", bufferDuration)
+            audioPlayerManager.frameBufferDuration = bufferDuration
+        }
+
         if (sources.isYoutube) {
             val youtube = YoutubeAudioSourceManager(serverConfig.isYoutubeSearchEnabled)
+            if (serverConfig.youtubeTimeout != -1) {
+                youtube.configureRequests {
+                    RequestConfig.copy(it).apply {
+                        setConnectTimeout(serverConfig.youtubeTimeout)
+                        setSocketTimeout(serverConfig.youtubeTimeout)
+                        setConnectionRequestTimeout(serverConfig.youtubeTimeout)
+                    }.build()
+                }
+            }
             if (routePlanner != null) {
                 val retryLimit = serverConfig.ratelimit?.retryLimit ?: -1
                 when {
@@ -49,12 +85,42 @@ class AudioPlayerConfiguration {
             }
             val playlistLoadLimit = serverConfig.youtubePlaylistLoadLimit
             if (playlistLoadLimit != null) youtube.setPlaylistPageCount(playlistLoadLimit)
+            val youtubeConfig = sources.youtubeConfig
+            if (youtubeConfig.PAPISID.isNotBlank() && youtubeConfig.PSID.isNotBlank() && youtubeConfig.PSIDCC.isNotBlank()) {
+                YoutubeHttpContextFilter.setPAPISID(youtubeConfig.PAPISID)
+                YoutubeHttpContextFilter.setPSID(youtubeConfig.PSID)
+                YoutubeHttpContextFilter.setPSIDCC(youtubeConfig.PSIDCC)
+            }
             audioPlayerManager.registerSourceManager(youtube)
         }
+        if (sources.isYandex) {
+            val yandexConfig = sources.yandexConfig
+            val yandex = YandexMusicAudioSourceManager()
+            if (yandexConfig.proxyHost.isNotBlank() && yandexConfig.proxyTimeout != -1) {
+                val credentials = UsernamePasswordCredentials(yandexConfig.proxyLogin, yandexConfig.proxyPass)
+                val credsProvider = BasicCredentialsProvider()
+                val authScope = AuthScope(yandexConfig.proxyHost, yandexConfig.proxyPort)
+                credsProvider.setCredentials(authScope, credentials)
+                yandex.configureBuilder { builder ->
+                    builder.setProxy(HttpHost(yandexConfig.proxyHost, yandexConfig.proxyPort))
+                            .setDefaultCredentialsProvider(credsProvider) }
+                yandex.configureRequests {
+                    RequestConfig.copy(it).apply {
+                        setConnectTimeout(yandexConfig.proxyTimeout)
+                        setSocketTimeout(yandexConfig.proxyTimeout)
+                        setConnectionRequestTimeout(yandexConfig.proxyTimeout)
+                    }.build()
+                }
+            }
+            if (yandexConfig.token.isNotBlank()) {
+                YandexHttpContextFilter.setOAuthToken(yandexConfig.token)
+            }
+            audioPlayerManager.registerSourceManager(yandex)
+        }
         if (sources.isSoundcloud) {
-            val dataReader = DefaultSoundCloudDataReader();
-            val dataLoader = DefaultSoundCloudDataLoader();
-            val formatHandler = DefaultSoundCloudFormatHandler();
+            val dataReader = DefaultSoundCloudDataReader()
+            val dataLoader = DefaultSoundCloudDataLoader()
+            val formatHandler = DefaultSoundCloudFormatHandler()
 
             audioPlayerManager.registerSourceManager(SoundCloudAudioSourceManager(
                     serverConfig.isSoundcloudSearchEnabled,
@@ -62,13 +128,33 @@ class AudioPlayerConfiguration {
                     dataLoader,
                     formatHandler,
                     DefaultSoundCloudPlaylistLoader(dataLoader, dataReader, formatHandler)
-            ));
+            ))
         }
         if (sources.isBandcamp) audioPlayerManager.registerSourceManager(BandcampAudioSourceManager())
         if (sources.isTwitch) audioPlayerManager.registerSourceManager(TwitchStreamAudioSourceManager())
         if (sources.isVimeo) audioPlayerManager.registerSourceManager(VimeoAudioSourceManager())
         if (sources.isMixer) audioPlayerManager.registerSourceManager(BeamAudioSourceManager())
-        if (sources.isHttp) audioPlayerManager.registerSourceManager(HttpAudioSourceManager())
+        if (sources.isHttp) {
+            val httpAudioConfig = sources.httpAudioConfig
+            val http = HttpAudioSourceManager()
+            if (httpAudioConfig.proxyHost.isNotBlank() && httpAudioConfig.proxyTimeout != -1) {
+                val credentials = UsernamePasswordCredentials(httpAudioConfig.proxyLogin, httpAudioConfig.proxyPass)
+                val credsProvider = BasicCredentialsProvider()
+                val authScope = AuthScope(httpAudioConfig.proxyHost, httpAudioConfig.proxyPort)
+                credsProvider.setCredentials(authScope, credentials)
+                http.configureBuilder { builder ->
+                    builder.setProxy(HttpHost(httpAudioConfig.proxyHost, httpAudioConfig.proxyPort))
+                            .setDefaultCredentialsProvider(credsProvider) }
+                http.configureRequests {
+                    RequestConfig.copy(it).apply {
+                        setConnectTimeout(httpAudioConfig.proxyTimeout)
+                        setSocketTimeout(httpAudioConfig.proxyTimeout)
+                        setConnectionRequestTimeout(httpAudioConfig.proxyTimeout)
+                    }.build()
+                }
+            }
+            audioPlayerManager.registerSourceManager(http)
+        }
         if (sources.isLocal) audioPlayerManager.registerSourceManager(LocalAudioSourceManager())
 
         audioPlayerManager.configuration.isFilterHotSwapEnabled = true
