@@ -27,24 +27,18 @@ import io.undertow.websockets.core.WebSocketCallback
 import io.undertow.websockets.core.WebSocketChannel
 import io.undertow.websockets.core.WebSockets
 import io.undertow.websockets.jsr.UndertowSession
-import lavalink.server.player.Player
 import lavalink.server.config.ServerConfig
+import lavalink.server.player.Player
 import moe.kyokobot.koe.KoeClient
 import moe.kyokobot.koe.KoeEventAdapter
 import moe.kyokobot.koe.VoiceConnection
-import moe.kyokobot.koe.VoiceServerInfo
 import org.json.JSONObject
 import org.slf4j.LoggerFactory
 import org.springframework.web.socket.WebSocketSession
 import org.springframework.web.socket.adapter.standard.StandardWebSocketSession
 import java.net.InetSocketAddress
 import java.util.*
-import java.util.concurrent.ConcurrentHashMap
-import java.util.concurrent.ConcurrentLinkedQueue
-import java.util.concurrent.Executors
-import java.util.concurrent.ScheduledExecutorService
-import java.util.concurrent.ScheduledFuture
-import java.util.concurrent.TimeUnit
+import java.util.concurrent.*
 
 class SocketContext internal constructor(
         val audioPlayerManager: AudioPlayerManager,
@@ -52,7 +46,7 @@ class SocketContext internal constructor(
         private var session: WebSocketSession,
         private val socketServer: SocketServer,
         val userId: String,
-        private val koe: KoeClient
+        val koe: KoeClient
 ) {
 
     companion object {

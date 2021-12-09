@@ -32,9 +32,8 @@ class ServerConfig {
     @get:Deprecated("use {@link SentryConfigProperties} instead.")
     var sentryDsn = ""
     var bufferDurationMs: Int? = null
-    var frameBufferDurationMs: Int? = null
     var youtubePlaylistLoadLimit: Int? = null
-    var playerUpdateInterval: Int? = 5
+    var playerUpdateInterval: Int = 5
     var isGcWarnings = true
     var isYoutubeSearchEnabled = true
     var youtubeTimeout = -1

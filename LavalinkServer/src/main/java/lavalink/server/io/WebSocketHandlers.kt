@@ -1,9 +1,9 @@
 package lavalink.server.io
 
-import lavalink.server.player.filters.Band
-import lavalink.server.player.filters.FilterChain
 import com.sedmelluq.discord.lavaplayer.track.TrackMarker
 import lavalink.server.player.TrackEndMarkerHandler
+import lavalink.server.player.filters.Band
+import lavalink.server.player.filters.FilterChain
 import lavalink.server.util.Util
 import moe.kyokobot.koe.VoiceServerInfo
 import org.json.JSONObject
@@ -29,11 +29,14 @@ class WebSocketHandlers(private val contextMap: Map<String, SocketContext>) {
 
         //discord sometimes send a partial server update missing the endpoint, which can be ignored.
         endpoint ?: return
+        //clear old connection
+        context.koe.destroyConnection(guildId)
 
         val player = context.getPlayer(guildId)
         val conn = context.getVoiceConnection(player)
-        conn.connect(VoiceServerInfo(sessionId, endpoint, token))
-        player.provideTo(conn)
+        conn.connect(VoiceServerInfo(sessionId, endpoint, token)).whenComplete { _, _ ->
+            player.provideTo(conn)
+        }
     }
 
     fun play(context: SocketContext, json: JSONObject) {
@@ -72,9 +75,6 @@ class WebSocketHandlers(private val contextMap: Map<String, SocketContext>) {
         }
 
         player.play(track)
-
-        val conn = context.getVoiceConnection(player)
-        context.getPlayer(json.getString("guildId")).provideTo(conn)
     }
 
     fun stop(context: SocketContext, json: JSONObject) {

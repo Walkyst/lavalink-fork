@@ -24,13 +24,12 @@ class KoeConfiguration(val serverConfig: ServerConfig) {
 
         if (nasSupported) {
             log.info("Enabling JDA-NAS")
-            var bufferSize = serverConfig.bufferDurationMs ?: UdpQueueFramePollerFactory.DEFAULT_BUFFER_DURATION
-            if (bufferSize <= 0) {
-                log.warn("Buffer size of {}ms is illegal. Defaulting to {}",
-                        bufferSize, UdpQueueFramePollerFactory.DEFAULT_BUFFER_DURATION)
-                bufferSize = UdpQueueFramePollerFactory.DEFAULT_BUFFER_DURATION
+            serverConfig.bufferDurationMs.let {
+                // Better have similar buffer duration as in LP, it enforces a minimum of 200ms and default is 5000ms
+                val bufferDuration = it?.takeIf { it >= 200 } ?: 5000
+                log.info("Setting frame buffer duration to {}ms in JDA-NAS", bufferDuration)
+                setFramePollerFactory(UdpQueueFramePollerFactory(bufferDuration, Runtime.getRuntime().availableProcessors()))
             }
-            setFramePollerFactory(UdpQueueFramePollerFactory(bufferSize, Runtime.getRuntime().availableProcessors()))
         } else {
             log.warn("This system and architecture appears to not support native audio sending! "
                     + "GC pauses may cause your bot to stutter during playback.")

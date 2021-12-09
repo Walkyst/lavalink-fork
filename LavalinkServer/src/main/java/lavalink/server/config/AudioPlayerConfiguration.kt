@@ -25,6 +25,7 @@ import com.sedmelluq.lava.extensions.youtuberotator.planner.RotatingIpRoutePlann
 import com.sedmelluq.lava.extensions.youtuberotator.planner.RotatingNanoIpRoutePlanner
 import com.sedmelluq.lava.extensions.youtuberotator.tools.ip.Ipv4Block
 import com.sedmelluq.lava.extensions.youtuberotator.tools.ip.Ipv6Block
+import lavalink.server.source.InvidiousSourceManager
 import org.apache.http.HttpHost
 import org.apache.http.auth.AuthScope
 import org.apache.http.auth.UsernamePasswordCredentials
@@ -52,14 +53,14 @@ class AudioPlayerConfiguration {
             audioPlayerManager.enableGcMonitoring()
         }
 
-        val defaultFrameBufferDuration = audioPlayerManager.frameBufferDuration
-        serverConfig.frameBufferDurationMs?.let {
-            if (it < 200) { // At the time of writing, LP enforces a minimum of 200ms.
-                log.warn("Buffer size of {}ms is illegal. Defaulting to {}", it, defaultFrameBufferDuration)
+        val defaultFrameBufferDuration = audioPlayerManager.frameBufferDuration // Default is 5000ms.
+        serverConfig.bufferDurationMs.let {
+            if ((it ?: 0) < 200) { // At the time of writing, LP enforces a minimum of 200ms.
+                log.warn("Buffer size of {}ms is illegal in LP. Defaulting to {}ms", it, defaultFrameBufferDuration)
             }
 
-            val bufferDuration = it.takeIf { it >= 200 } ?: defaultFrameBufferDuration
-            log.debug("Setting frame buffer duration to {}", bufferDuration)
+            val bufferDuration = it?.takeIf { it >= 200 } ?: defaultFrameBufferDuration
+            log.info("Setting frame buffer duration to {}ms in LP", bufferDuration)
             audioPlayerManager.frameBufferDuration = bufferDuration
         }
 
@@ -80,7 +81,6 @@ class AudioPlayerConfiguration {
                     retryLimit < 0 -> YoutubeIpRotatorSetup(routePlanner).forSource(youtube).setup()
                     retryLimit == 0 -> YoutubeIpRotatorSetup(routePlanner).forSource(youtube).withRetryLimit(Int.MAX_VALUE).setup()
                     else -> YoutubeIpRotatorSetup(routePlanner).forSource(youtube).withRetryLimit(retryLimit).setup()
-
                 }
             }
             val playlistLoadLimit = serverConfig.youtubePlaylistLoadLimit
